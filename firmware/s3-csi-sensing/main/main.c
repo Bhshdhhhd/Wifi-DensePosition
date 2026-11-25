@@ -3,6 +3,7 @@
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <math.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -84,6 +85,82 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
  * feature. It is not yet a presence or breathing measurement.
  */
 
+
+#define CSI_EXPORT_BINS 32
+
+/*
+ * Export 32 pooled CSI magnitude bands per received frame.
+ * Format:
+ * CSI,timestamp_us,rssi,channel,pair_count,m0,...,m31
+ */
+static void emit_csi_dataset_record(const csi_sample_t *sample)
+{
+    uint16_t start = sample->first_word_invalid ? 4 : 0;
+
+    if (sample->len <= start) {
+        return;
+    }
+
+    uint16_t pairs = (sample->len - start) / 2;
+
+    char line[384];
+
+    int used = snprintf(
+        line,
+        sizeof(line),
+        "CSI,%lld,%d,%u,%u",
+        (long long)esp_timer_get_time(),
+        sample->rssi,
+        sample->channel,
+        pairs
+    );
+
+    if (used < 0 || used >= sizeof(line)) {
+        return;
+    }
+
+    for (uint16_t g = 0; g < CSI_EXPORT_BINS; g++) {
+        uint16_t first = (g * pairs) / CSI_EXPORT_BINS;
+        uint16_t last = ((g + 1) * pairs) / CSI_EXPORT_BINS;
+
+        float total = 0.0f;
+        uint16_t count = 0;
+
+        for (uint16_t b = first; b < last; b++) {
+            uint16_t i = start + b * 2;
+
+            int real = (int8_t)sample->data[i + 1];
+            int imag = (int8_t)sample->data[i];
+
+            total += sqrtf(
+                (float)(real * real + imag * imag)
+            );
+
+            count++;
+        }
+
+        unsigned int magnitude = count > 0
+            ? (unsigned int)(total / count + 0.5f)
+            : 0;
+
+        int written = snprintf(
+            line + used,
+            sizeof(line) - used,
+            ",%u",
+            magnitude
+        );
+
+        if (written < 0 || written >= sizeof(line) - used) {
+            return;
+        }
+
+        used += written;
+    }
+
+    printf("%s\n", line);
+    fflush(stdout);
+}
+
 static void csi_processing_task(void *arg)
 {
     csi_sample_t sample;
@@ -134,6 +211,8 @@ static void csi_processing_task(void *arg)
                 sample.len,
                 sample.first_word_invalid
             );
+
+            emit_csi_dataset_record(&sample);
 
             frame_count++;
             last_rssi = sample.rssi;
