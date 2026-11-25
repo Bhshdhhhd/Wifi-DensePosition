@@ -39,7 +39,8 @@ void presence_detector_update(
         bins = PD_MAX_SUBCARRIERS;
     }
 
-    float magnitudes[PD_MAX_SUBCARRIERS];
+    /* Scratch buffer shared by the single CSI processing task. */
+    static float magnitudes[PD_MAX_SUBCARRIERS];
 
     for (uint16_t b = 0; b < bins; b++) {
         uint16_t i = start + b * 2;

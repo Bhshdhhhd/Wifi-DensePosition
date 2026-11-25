@@ -87,7 +87,7 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
 static void csi_processing_task(void *arg)
 {
     csi_sample_t sample;
-    presence_detector_t detector;
+    static presence_detector_t detector;
 
     presence_detector_init(&detector);
 
@@ -364,7 +364,7 @@ void app_main(void)
     BaseType_t task_result = xTaskCreate(
         csi_processing_task,
         "csi_processing",
-        4096,
+        8192,
         NULL,
         5,
         NULL
